@@ -1,0 +1,6 @@
+{
+  "name": "whatsapp",
+  "description": "WhatsApp channel for Claude Code — inbound messages push into the running session, replies and tool-approval polls go back to the phone. Manage pairing and allowlists with /whatsapp:access.",
+  "version": "0.1.0",
+  "keywords": ["whatsapp", "messaging", "channel", "mcp", "baileys"]
+}

@@ -1,0 +1,45 @@
+{
+  "name": "claude-channel-whatsapp",
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "bin": "./server.ts",
+  "scripts": {
+    "start": "bun install --no-summary 1>&2 && bun server.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@llamaindex/liteparse": "^1.5.3",
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "baileys": "^7.0.0-rc14",
+    "ffmpeg-static": "^5.3.0",
+    "pino": "^10.3.1",
+    "qrcode-terminal": "^0.12.0",
+    "zod": "^3.23.8"
+  },
+  "optionalDependencies": {
+    "whisper-cpp-node": "^0.2.12"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@types/qrcode-terminal": "^0.12.2",
+    "typescript": "^5.3.0"
+  },
+  "description": "WhatsApp channel for Claude Code — inbound messages push into the running session; replies and tool-approval polls go back to the phone.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lwyxzm/claude-whatsapp-channel.git"
+  },
+  "bugs": {
+    "url": "https://github.com/lwyxzm/claude-whatsapp-channel/issues"
+  },
+  "homepage": "https://github.com/lwyxzm/claude-whatsapp-channel#readme",
+  "keywords": [
+    "claude-code",
+    "claude",
+    "channel",
+    "mcp",
+    "whatsapp",
+    "baileys"
+  ]
+}

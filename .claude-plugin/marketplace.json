@@ -1,0 +1,16 @@
+{
+  "name": "whatsapp-channel-local",
+  "description": "Local marketplace for the WhatsApp channel plugin",
+  "owner": {
+    "name": "lwyxzm"
+  },
+  "plugins": [
+    {
+      "name": "whatsapp",
+      "description": "WhatsApp channel for Claude Code — inbound messages push into the running session; replies and tool-approval polls go back to the phone.",
+      "version": "0.1.0",
+      "source": "./",
+      "category": "messaging"
+    }
+  ]
+}
