@@ -21,7 +21,7 @@ import { z } from 'zod';
 import { writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as qrcode from 'qrcode-terminal';
-import { getAggregateVotesInPollMessage } from 'baileys';
+
 
 import { SessionManager } from './src/services/session.manager.js';
 import { WhatsAppService } from './src/services/whatsapp.service.js';
@@ -36,6 +36,7 @@ import { createStoragePaths } from './src/services/storage-path.js';
 import { initI18n } from './src/i18n.js';
 import { PermissionRelay } from './src/channel/permission.js';
 import type { SentPoll } from './src/channel/permission.js';
+import { readPollVote } from './src/channel/poll-vote.js';
 
 initI18n(undefined);
 
@@ -93,19 +94,46 @@ const mcp = new Server(
 
 // ─────────────────────────── Permission relay ───────────────────────────
 
+/** Matches MessageSender's tolerance for a socket that just came up. */
+const POLL_SEND_ATTEMPTS = 4;
+
 const relay = new PermissionRelay({
     // Direct chats only. Group members never passed an explicit pairing, so
     // they must not be able to approve tool use in the user's session.
     recipients: () => sessionManager.getAllowList().map(c => whatsapp.resolveOutboundRecipientJid(c.number)),
     sendPoll: async (jid, question, options): Promise<SentPoll | null> => {
-        const socket = whatsapp.getSocket() as any;
-        if (!socket) return null;
-        const sent = await socket.sendMessage(jid, {
-            poll: { name: question, values: options, selectableCount: 1 },
-        });
-        const messageId = sent?.key?.id;
-        if (!messageId || !sent?.message) return null;
-        return { messageId, pollMessage: sent.message };
+        // A send issued moments after the socket opens fails with "Connection
+        // Closed" while Baileys is still settling. MessageSender retries for
+        // ordinary messages; a poll goes down the raw socket because the typed
+        // surface has no poll variant, so it needs the same treatment.
+        let lastError: unknown;
+        for (let attempt = 1; attempt <= POLL_SEND_ATTEMPTS; attempt++) {
+            const socket = whatsapp.getSocket() as any;
+            if (socket) {
+                try {
+                    const sent = await socket.sendMessage(jid, {
+                        poll: { name: question, values: options, selectableCount: 1 },
+                    });
+                    const messageId = sent?.key?.id;
+                    if (messageId && sent?.message) {
+                        // Baileys decrypts an inbound vote by asking getMessage()
+                        // for the poll it belongs to, and that callback reads the
+                        // service's sent-message cache. A poll sent straight down
+                        // the socket never lands there, so the vote comes back
+                        // undecryptable and no pollUpdates event is ever emitted.
+                        whatsapp.cacheSentMessage(messageId, sent.message);
+                        return { messageId, pollMessage: sent.message };
+                    }
+                } catch (error) {
+                    lastError = error;
+                }
+            }
+            if (attempt < POLL_SEND_ATTEMPTS) {
+                await new Promise(resolve => setTimeout(resolve, 2 ** attempt * 500));
+            }
+        }
+        log(`poll send to ${jid} gave up after ${POLL_SEND_ATTEMPTS} attempts: ${String(lastError)}`);
+        return null;
     },
     sendText: async (jid, text) => {
         await whatsapp.sendMessage(jid, text);
@@ -134,9 +162,10 @@ mcp.setNotificationHandler(
 );
 
 /**
- * Poll votes arrive on messages.update, which WhatsAppService does not expose.
- * The socket is replaced on every reconnect, so re-attach whenever the status
- * callback fires and the instance has changed.
+ * Poll votes arrive as a raw pollUpdateMessage on messages.upsert, not as
+ * messages.update with pollUpdates — Baileys ships that decryption commented
+ * out (see src/channel/poll-vote.ts). The socket is replaced on every
+ * reconnect, so re-attach whenever the status callback reports a new instance.
  */
 let wiredSocket: unknown = null;
 const wirePollListener = () => {
@@ -144,21 +173,18 @@ const wirePollListener = () => {
     if (!socket || socket === wiredSocket) return;
     wiredSocket = socket;
 
-    socket.ev.on('messages.update', (updates: any[]) => {
-        for (const update of updates ?? []) {
-            const messageId = update?.key?.id;
-            const pollUpdates = update?.update?.pollUpdates;
-            if (!messageId || !pollUpdates || !relay.isTrackedPoll(messageId)) continue;
-
+    socket.ev.on('messages.upsert', async (payload: any) => {
+        for (const message of payload?.messages ?? []) {
+            if (!message?.message?.pollUpdateMessage) continue;
             try {
-                const votes = getAggregateVotesInPollMessage(
-                    { message: relay.pollMessageFor(messageId) as any, pollUpdates },
-                    socket.user?.id,
+                const vote = await readPollVote(message, socket.user?.id, id =>
+                    relay.isTrackedPoll(id) ? (relay.pollMessageFor(id) as any) : undefined,
                 );
-                const chosen = votes.filter(v => (v.voters?.length ?? 0) > 0).map(v => v.name);
-                relay.onPollVote(messageId, chosen);
+                // A vote we cannot read is not a verdict. Stay silent and let
+                // the text fallback or the terminal dialog decide.
+                if (vote) relay.onPollVote(vote.pollMessageId, vote.selected);
             } catch (error) {
-                log(`poll vote for ${messageId} failed to decrypt: ${String(error)}`);
+                log(`poll vote could not be read: ${String(error)}`);
             }
         }
     });

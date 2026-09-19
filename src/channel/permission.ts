@@ -91,10 +91,17 @@ export class PermissionRelay {
 
         this.pending.set(request.request_id, { request, createdAt: Date.now(), jids });
 
-        const question = truncate(
-            `🔐 ${request.tool_name}${request.description ? ` — ${request.description}` : ''}`,
-            POLL_QUESTION_MAX,
-        );
+        // The hint rides along in the question because a tap is not guaranteed
+        // to reach us: Baileys ships poll-vote decryption commented out, and
+        // src/channel/poll-vote.ts reimplements it. If that ever stops working,
+        // a poll with no visible alternative would leave the user unable to
+        // answer at all, so the typed verdict stays one line away.
+        const hint = ` · or reply "y ${request.request_id}"`;
+        const question =
+            truncate(
+                `🔐 ${request.tool_name}${request.description ? ` — ${request.description}` : ''}`,
+                POLL_QUESTION_MAX - hint.length,
+            ) + hint;
 
         for (const jid of jids) {
             let delivered = false;

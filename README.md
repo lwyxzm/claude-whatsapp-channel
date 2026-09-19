@@ -61,8 +61,16 @@ transcribed.
 ## Permission relay
 
 A tool-approval prompt opens in the terminal **and** goes to your phone as a
-poll (✅ Allow / ❌ Deny). Whichever answer lands first wins. If the poll cannot
-be sent, the server falls back to a text prompt — reply `y <id>` or `n <id>`.
+poll (✅ Allow / ❌ Deny). Whichever answer lands first wins.
+
+Answer by tapping the poll, or by replying `y <id>` / `n <id>` — the id is in
+the poll's own title, and English and Chinese verdicts both parse. **The typed
+verdict is the dependable path.** Baileys ships poll-vote decryption commented
+out in every published version, 6.7.24 through 7.0.0-rc14, marked
+`TODO: Remove entirely`, so `src/channel/poll-vote.ts` reimplements it from the
+primitives Baileys still exports. Sending polls is verified; a tap being read
+back is not yet confirmed on a live account. If a Baileys upgrade breaks the
+tap, that one file is where to look, and typing the verdict keeps working.
 
 Only direct chats on `allowList` are asked. Group members never are.
 
