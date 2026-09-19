@@ -1,6 +1,6 @@
 import { useMultiFileAuthState } from 'baileys';
 import { basename, join } from 'path';
-import { readFile, writeFile, mkdir, rm, rename, readdir } from 'fs/promises';
+import { readFile, writeFile, mkdir, rm, rename, readdir, stat } from 'fs/promises';
 import { SessionStatus } from '../models/whatsapp.types.js';
 import { t } from '../i18n.js';
 import {
@@ -16,6 +16,23 @@ export interface Contact {
     number: string;
     name?: string;
     sendNumber?: string;
+}
+
+/** Tolerates the shapes config.json has been written in over time. */
+function toContact(item: any): Contact | null {
+    if (typeof item === 'string') return { number: item };
+    if (item && typeof item === 'object') {
+        let num = item.number;
+        // Unroll nested objects if any
+        while (num && typeof num === 'object' && num.number) {
+            num = num.number;
+        }
+        if (typeof num === 'string') {
+            const sendNumber = typeof item.sendNumber === 'string' ? item.sendNumber : undefined;
+            return { number: num, name: item.name, sendNumber };
+        }
+    }
+    return null;
 }
 
 export class SessionManager {
@@ -45,6 +62,16 @@ export class SessionManager {
     private visionModel: string = 'gpt-4o';
     private operatorJid: string = '';
     private configLoaded = false;
+
+    /**
+     * config.json is edited from outside this process too (the /whatsapp:access
+     * CLI). `configStamp` lets a read notice that, and `listFingerprints`
+     * records what the three access lists looked like when we last read them,
+     * so a save can tell "we changed this" from "someone else did".
+     */
+    private static readonly ACCESS_LISTS = ['allowList', 'allowedGroups', 'ignoredNumbers'] as const;
+    private configStamp = '';
+    private listFingerprints: Record<string, string> = {};
 
     constructor(baseDir = getDefaultStorageRoot(), legacyBaseDir = baseDir === getDefaultStorageRoot() ? getDefaultLegacyStorageRoot() : baseDir) {
         this.storagePaths = createStoragePaths(baseDir, legacyBaseDir);
@@ -88,28 +115,12 @@ export class SessionManager {
             const data = await readFile(this.configPath, 'utf-8');
             const { config, recovered } = this.parseConfig(data);
             
-            const cleanContact = (item: any): Contact | null => {
-                if (typeof item === 'string') return { number: item };
-                if (item && typeof item === 'object') {
-                    let num = item.number;
-                    // Unroll nested objects if any
-                    while (num && typeof num === 'object' && num.number) {
-                        num = num.number;
-                    }
-                    if (typeof num === 'string') {
-                        const sendNumber = typeof item.sendNumber === 'string' ? item.sendNumber : undefined;
-                        return { number: num, name: item.name, sendNumber };
-                    }
-                }
-                return null;
-            };
-
-            const loadedAllowList = (config.allowList || []).map(cleanContact).filter(Boolean) as Contact[];
-            const loadedAllowedGroups = (config.allowedGroups || []).map(cleanContact).filter(Boolean) as Contact[];
-            const migratedGroups = loadedAllowList.filter(c => SessionManager.isGroupJid(c.number));
-            this.allowList = loadedAllowList.filter(c => !SessionManager.isGroupJid(c.number));
-            this.allowedGroups = this.mergeContacts(loadedAllowedGroups, migratedGroups);
-            this.ignoredNumbers = (config.ignoredNumbers || []).map(cleanContact).filter(Boolean) as Contact[];
+            const lists = this.readAccessLists(config);
+            this.allowList = lists.allowList;
+            this.allowedGroups = lists.allowedGroups;
+            this.ignoredNumbers = lists.ignoredNumbers;
+            this.captureListFingerprints();
+            this.configStamp = await this.readConfigStamp();
             this.status = config.status || 'logged-out';
             this.hasAuthState = Boolean(config.hasAuthState);
             this.openaiKey = config.openaiKey || '';
@@ -121,6 +132,66 @@ export class SessionManager {
             }
         } catch {
             // File not found is fine
+        }
+    }
+
+    /** A group JID parked in allowList is migrated into allowedGroups. */
+    private readAccessLists(config: any): { allowList: Contact[]; allowedGroups: Contact[]; ignoredNumbers: Contact[] } {
+        const allow = (config?.allowList || []).map(toContact).filter(Boolean) as Contact[];
+        const groups = (config?.allowedGroups || []).map(toContact).filter(Boolean) as Contact[];
+        const migrated = allow.filter(c => SessionManager.isGroupJid(c.number));
+        return {
+            allowList: allow.filter(c => !SessionManager.isGroupJid(c.number)),
+            allowedGroups: this.mergeContacts(groups, migrated),
+            ignoredNumbers: (config?.ignoredNumbers || []).map(toContact).filter(Boolean) as Contact[]
+        };
+    }
+
+    private captureListFingerprints() {
+        for (const key of SessionManager.ACCESS_LISTS) {
+            this.listFingerprints[key] = JSON.stringify(this[key]);
+        }
+    }
+
+    /** mtime alone can collide within a millisecond, so pair it with size. */
+    private async readConfigStamp(): Promise<string> {
+        try {
+            const info = await stat(this.configPath);
+            return `${info.mtimeMs}:${info.size}`;
+        } catch {
+            return '';
+        }
+    }
+
+    /**
+     * Pick up an external edit to config.json. Call this before any allow-list
+     * decision so `/whatsapp:access allow` takes effect without a restart.
+     */
+    public async reloadIfChanged(): Promise<boolean> {
+        if (!this.configLoaded) return false;
+        const stamp = await this.readConfigStamp();
+        if (!stamp || stamp === this.configStamp) return false;
+        await this.loadConfig();
+        return true;
+    }
+
+    /**
+     * Our in-memory copy is a snapshot, and saveConfig() rewrites the whole
+     * file — so a list we never touched must be re-read from disk first, or an
+     * unrelated save (a status change, a dropped message) would silently revert
+     * someone else's edit.
+     */
+    private async adoptExternalListEdits() {
+        let config: any;
+        try {
+            config = this.parseConfig(await readFile(this.configPath, 'utf-8')).config;
+        } catch {
+            return; // No readable file: our state is all there is.
+        }
+        const onDisk = this.readAccessLists(config);
+        for (const key of SessionManager.ACCESS_LISTS) {
+            if (JSON.stringify(this[key]) !== this.listFingerprints[key]) continue;
+            this[key] = onDisk[key];
         }
     }
 
@@ -180,6 +251,7 @@ export class SessionManager {
     public async saveConfig() {
         const tempPath = `${this.configPath}.${process.pid}.${Date.now()}.tmp`;
         try {
+            await this.adoptExternalListEdits();
             this.hasAuthState = this.hasAuthState || await this.hasCredentialsFile();
             const config = {
                 allowList: this.allowList,
@@ -201,6 +273,9 @@ export class SessionManager {
                 await writeFile(this.configPath, serialized);
                 await this.removeConfigTempFile(tempPath);
             }
+            // Our own write must not look like an external edit on the next read.
+            this.captureListFingerprints();
+            this.configStamp = await this.readConfigStamp();
         } catch (error) {
             await this.removeConfigTempFile(tempPath);
             console.error(t('session.manager.failedSaveConfig'), error);

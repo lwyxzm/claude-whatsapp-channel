@@ -771,6 +771,10 @@ export class WhatsAppService {
 
         const pushName = message.pushName || undefined;
 
+        // `/whatsapp:access` edits config.json from another process, so refresh
+        // before deciding — otherwise a new entry only lands on the next restart.
+        await this.sessionManager.reloadIfChanged();
+
         if (this.boundGroupJid) {
             if (!this.sessionManager.isAllowedGroup(this.boundGroupJid)) {
                 await this.sessionManager.trackIgnoredNumber(this.boundGroupJid, pushName);
