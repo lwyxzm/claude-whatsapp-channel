@@ -87,6 +87,10 @@ legacy root that migrates from.
 - Events arrive only while a session is open. For always-on, keep one running.
 - Requires Anthropic auth (claude.ai or Console API key). Not on Bedrock,
   Vertex, or Foundry.
+- One connection per account. WhatsApp allows a linked device a single live
+  session, so this plugin and the whatsapp-pi Pi extension cannot both be
+  connected with the same credentials — whichever connects last kicks the other
+  off. Stop one before starting the other, or link a second device.
 - Verbose mode is intentionally unavailable: it would raise pino to `trace`,
   and pino writes to stdout, which corrupts the MCP stream. Use `claude --debug`
   and read stderr.
