@@ -1,11 +1,7 @@
 MIT License
 
 Copyright (c) 2026 lwyxzm
-Copyright (c) 2025 Rapha (https://github.com/RaphaCastelloes)
-
-This project is a derivative work. The WhatsApp service layer under src/services
-and src/models originates in whatsapp-pi (https://github.com/RaphaCastelloes/whatsapp-pi),
-which is MIT licensed, and is reused here substantially unchanged.
+Copyright (c) 2025 Rapha
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

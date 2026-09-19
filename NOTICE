@@ -1,0 +1,20 @@
+claude-whatsapp-channel
+Copyright (c) 2026 lwyxzm
+
+This product is a derivative work.
+
+The WhatsApp service layer under src/services/ and src/models/ originates in
+whatsapp-pi, a WhatsApp extension for the Pi coding agent:
+
+    whatsapp-pi
+    Copyright (c) 2025 Rapha
+    https://github.com/RaphaCastelloes/whatsapp-pi
+    Licensed under the MIT License
+
+That code is reused here substantially unchanged. The only modified file is
+src/services/storage-path.ts, where the storage root was repointed from the Pi
+extension's directory to ~/.claude/channels/whatsapp/ and the former is kept as
+the legacy root so existing credentials migrate on first run.
+
+Added by this project: the Claude Code channel layer (server.ts, src/channel/),
+the permission relay, the stdout guard, and the access skill.
