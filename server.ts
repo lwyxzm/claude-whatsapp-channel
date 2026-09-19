@@ -177,8 +177,11 @@ const wirePollListener = () => {
         for (const message of payload?.messages ?? []) {
             if (!message?.message?.pollUpdateMessage) continue;
             try {
-                const vote = await readPollVote(message, socket.user?.id, id =>
-                    relay.isTrackedPoll(id) ? (relay.pollMessageFor(id) as any) : undefined,
+                const vote = await readPollVote(
+                    message,
+                    socket.user?.id,
+                    id => (relay.isTrackedPoll(id) ? (relay.pollMessageFor(id) as any) : undefined),
+                    socket.user?.lid,
                 );
                 // A vote we cannot read is not a verdict. Stay silent and let
                 // the text fallback or the terminal dialog decide.

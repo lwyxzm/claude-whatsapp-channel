@@ -64,13 +64,23 @@ A tool-approval prompt opens in the terminal **and** goes to your phone as a
 poll (✅ Allow / ❌ Deny). Whichever answer lands first wins.
 
 Answer by tapping the poll, or by replying `y <id>` / `n <id>` — the id is in
-the poll's own title, and English and Chinese verdicts both parse. **The typed
-verdict is the dependable path.** Baileys ships poll-vote decryption commented
-out in every published version, 6.7.24 through 7.0.0-rc14, marked
-`TODO: Remove entirely`, so `src/channel/poll-vote.ts` reimplements it from the
-primitives Baileys still exports. Sending polls is verified; a tap being read
-back is not yet confirmed on a live account. If a Baileys upgrade breaks the
-tap, that one file is where to look, and typing the verdict keeps working.
+the poll's own title, and English and Chinese verdicts both parse. Both paths
+are verified end to end against a live account.
+
+Reading a tap back takes `src/channel/poll-vote.ts`, because Baileys cannot do
+it. Its own implementation is commented out in every published version, 6.7.24
+through 7.0.0-rc14, under a `TODO: Remove entirely`, and downgrading is not a
+way out. The reason it was abandoned is worth knowing if you maintain this:
+**WhatsApp now addresses chats by LID**, and a vote's GCM authenticated data is
+built from LID identities, while Baileys' `getKeyAuthor` answers in phone-JID
+form. Decryption fails with `unable to authenticate data` no matter how correct
+the key is. This file prefers the LID on both the poll creator and the voter,
+keeping the phone JID as the pre-LID fallback, and recovers the chosen labels by
+hashing the poll's own options — a vote carries SHA-256 of the option names, not
+the names.
+
+If a Baileys upgrade breaks the tap, that is the one file to look at, and typing
+the verdict keeps working regardless.
 
 Only direct chats on `allowList` are asked. Group members never are.
 

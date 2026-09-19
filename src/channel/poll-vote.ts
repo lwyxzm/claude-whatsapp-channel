@@ -57,10 +57,14 @@ const sha256Hex = async (value: string): Promise<string> => {
  * unknown, or when decryption fails — every one of which means the caller
  * should keep waiting rather than assume an answer.
  */
+const dedupe = (values: Array<string | null | undefined>): string[] =>
+    [...new Set(values.filter((v): v is string => Boolean(v)))];
+
 export async function readPollVote(
     message: any,
     meId: string | undefined,
     findPoll: (pollMessageId: string) => PollCreation,
+    meLid?: string,
 ): Promise<PollVote | null> {
     const update = message?.message?.pollUpdateMessage;
     if (!update?.vote || !meId) return null;
@@ -73,18 +77,42 @@ export async function readPollVote(
     const pollEncKey = poll?.messageContextInfo?.messageSecret;
     if (!pollEncKey) return null;
 
-    const me = jidNormalizedUser(meId);
-    let vote: { selectedOptions?: Uint8Array[] | null };
-    try {
-        vote = decryptPollVote(update.vote, {
-            pollEncKey: pollEncKey as Uint8Array,
-            pollCreatorJid: getKeyAuthor(creationKey, me),
-            pollMsgId: pollMessageId,
-            voterJid: getKeyAuthor(message.key, me),
-        });
-    } catch {
-        return null;
+    // The vote's authenticated data is built from LID identities whenever the
+    // chat is LID-addressed, which is now the default. getKeyAuthor answers in
+    // phone-JID form, so using it directly fails GCM authentication with
+    // "unable to authenticate data" — the reason Baileys' own copy of this
+    // stopped working and was commented out. Prefer the LID on both sides and
+    // keep the phone JID as the pre-LID fallback.
+    const creatorCandidates = dedupe([
+        meLid && jidNormalizedUser(meLid),
+        getKeyAuthor(creationKey, jidNormalizedUser(meId)),
+    ]);
+    const voterCandidates = dedupe([
+        // The sender's LID is the chat's own addressing identity.
+        creationKey.remoteJid?.endsWith('@lid') ? jidNormalizedUser(creationKey.remoteJid) : null,
+        message.key?.participant ? jidNormalizedUser(message.key.participant) : null,
+        message.key?.remoteJidAlt ? jidNormalizedUser(message.key.remoteJidAlt) : null,
+        getKeyAuthor(message.key, jidNormalizedUser(meId)),
+    ]);
+
+    let vote: { selectedOptions?: Uint8Array[] | null } | null = null;
+    for (const pollCreatorJid of creatorCandidates) {
+        for (const voterJid of voterCandidates) {
+            try {
+                vote = decryptPollVote(update.vote, {
+                    pollEncKey: pollEncKey as Uint8Array,
+                    pollCreatorJid,
+                    pollMsgId: pollMessageId,
+                    voterJid,
+                });
+                break;
+            } catch {
+                // Wrong identity pairing for this chat; try the next one.
+            }
+        }
+        if (vote) break;
     }
+    if (!vote) return null;
 
     const chosenHashes = new Set(
         (vote.selectedOptions ?? []).map(o =>
